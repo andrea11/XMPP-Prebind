@@ -6,7 +6,7 @@
  * @author Michael Weibel <michael.weibel@amiadogroup.com>
  */
 
-namespace andrea11\XmppPrebind;
+namespace andrea11;
 
 use yii\base\ErrorException;
 
