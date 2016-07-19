@@ -13,7 +13,7 @@ use yii\base\ErrorException;
 /**
  * PEAR Auth_SASL
  */
-require 'Auth/SASL.php';
+require 'lib/Auth/SASL.php';
 
 /**
  * XMPP Library for connecting to jabber server & receiving sid and rid
