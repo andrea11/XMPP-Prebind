@@ -20,7 +20,9 @@
         }
     ],
     "autoload": {
-        "psr4": ["lib/"]
+        "psr-4" : {
+	  "andrea11\\ProsodyRestApi\\" : ""
+	}
     },
     "require": {
         "php": ">=5.3",
