@@ -1,5 +1,5 @@
 {
-    "name": "piotr-cz/xmpp-prebind-php",
+    "name": "andrea11/xmpp-prebind-php",
     "description": "This class is for prebinding a XMPP Session with PHP.",
     "version": "0.1.0",
     "type": "library",
@@ -20,7 +20,7 @@
         }
     ],
     "autoload": {
-        "classmap": ["lib/"]
+        "psr4": ["lib/"]
     },
     "require": {
         "php": ">=5.3",

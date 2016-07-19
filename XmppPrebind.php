@@ -6,10 +6,9 @@
  * @author Michael Weibel <michael.weibel@amiadogroup.com>
  */
 
-/**
- * FirePHP for debugging
- */
-include 'FirePHP/fb.php';
+namespace andrea11\XmppPrebind;
+
+use yii\base\ErrorException;
 
 /**
  * PEAR Auth_SASL
@@ -21,13 +20,13 @@ require 'Auth/SASL.php';
  */
 class XmppPrebind {
 
-	const XMLNS_BODY    = 'http://jabber.org/protocol/httpbind';
-	const XMLNS_BOSH    = 'urn:xmpp:xbosh';
-	const XMLNS_CLIENT  = 'jabber:client';
-	const XMLNS_SESSION = 'urn:ietf:params:xml:ns:xmpp-session';
-	const XMLNS_BIND    = 'urn:ietf:params:xml:ns:xmpp-bind';
-	const XMLNS_SASL    = 'urn:ietf:params:xml:ns:xmpp-sasl';
-	const XMLNS_VCARD   = 'vcard-temp';
+	const XMLNS_BODY    	= 'http://jabber.org/protocol/httpbind';
+	const XMLNS_BOSH    	= 'urn:xmpp:xbosh';
+	const XMLNS_CLIENT  	= 'jabber:client';
+	const XMLNS_SESSION 	= 'urn:ietf:params:xml:ns:xmpp-session';
+	const XMLNS_BIND    	= 'urn:ietf:params:xml:ns:xmpp-bind';
+	const XMLNS_SASL    	= 'urn:ietf:params:xml:ns:xmpp-sasl';
+	const XMLNS_VCARD   	= 'vcard-temp';
 
 	const XML_LANG      = 'en';
 	const CONTENT_TYPE  = 'text/xml charset=utf-8';
@@ -35,6 +34,7 @@ class XmppPrebind {
 	const ENCRYPTION_PLAIN      = 'PLAIN';
 	const ENCRYPTION_DIGEST_MD5 = 'DIGEST-MD5';
 	const ENCRYPTION_CRAM_MD5 = 'CRAM-MD5';
+	const ENCRYPTION_SCRAM_SHA_1 = 'SCRAM-SHA-1';
 
 	const SERVICE_NAME = 'xmpp';
 
@@ -43,12 +43,6 @@ class XmppPrebind {
 	protected $resource   = '';
 
 	protected $debug = false;
-	/**
-	 * FirePHP Instance
-	 *
-	 * @var FirePHP
-	 */
-	protected $firePhp = null;
 
 	protected $useGzip = false;
 	protected $useSsl = false;
@@ -101,10 +95,6 @@ class XmppPrebind {
 		$this->useSsl = $useSsl;
 
 		$this->debug = $debug;
-		if ($this->debug === true) {
-			$this->firePhp = FirePHP::getInstance(true);
-			$this->firePhp->setEnabled(true);
-		}
 
 		/* TODO: Not working
 		 if (function_exists('gzinflate')) {
@@ -175,7 +165,9 @@ class XmppPrebind {
 			$this->mechanisms[] = $value->nodeValue;
 		}
 
-		if (in_array(self::ENCRYPTION_DIGEST_MD5, $this->mechanisms)) {
+		if (in_array(self::ENCRYPTION_SCRAM_SHA_1, $this->mechanisms)) {
+			$this->encryption = self::ENCRYPTION_SCRAM_SHA_1;
+		} elseif (in_array(self::ENCRYPTION_DIGEST_MD5, $this->mechanisms)) {
 			$this->encryption = self::ENCRYPTION_DIGEST_MD5;
 		} elseif (in_array(self::ENCRYPTION_CRAM_MD5, $this->mechanisms)) {
 			$this->encryption = self::ENCRYPTION_CRAM_MD5;
@@ -198,7 +190,8 @@ class XmppPrebind {
 	 * @return bool
 	 */
 	public function auth() {
-		$auth = Auth_SASL::factory($this->encryption);
+		$authFactory = new Auth_SASL();
+		$auth = $authFactory->factory($this->encryption);
 
 		switch ($this->encryption) {
 			case self::ENCRYPTION_PLAIN:
@@ -210,10 +203,12 @@ class XmppPrebind {
 			case self::ENCRYPTION_CRAM_MD5:
 				$authXml = $this->sendChallengeAndBuildCramMd5Auth($auth);
 				break;
+			case self::ENCRYPTION_SCRAM_SHA_1:
+				$authXml = $this->sendChallengeAndBuildScramSha1Auth($auth);
+				break;
 		}
-		$response = $this->send($authXml);
 
-		$body = self::getBodyFromXml($response);
+		$body = self::getBodyFromXml($authXml);
 
 		if (!$body->hasChildNodes() || $body->firstChild->nodeName !== 'success') {
 			throw new XmppPrebindException("Invalid login");
@@ -263,9 +258,7 @@ class XmppPrebind {
 	 * @param string $label
 	 */
 	protected function debug($msg, $label = null) {
-		if ($this->firePhp) {
-			$this->firePhp->log($msg, $label);
-		}
+		error_log($label." : ".$msg);
 	}
 
 	/**
@@ -374,7 +367,6 @@ class XmppPrebind {
 		{
 			$body->appendChild(self::getNewTextAttribute($domDocument, 'route', $route));
 		}
-
 		return $this->send($domDocument->saveXML());
 	}
 
@@ -383,17 +375,21 @@ class XmppPrebind {
 	 *
 	 * @return string Challenge
 	 */
-	protected function sendChallenge() {
+	protected function sendChallenge($initialMessage = null) {
 		$domDocument = $this->buildBody();
 		$body = self::getBodyFromDomDocument($domDocument);
 
 		$auth = $domDocument->createElement('auth');
 		$auth->appendChild(self::getNewTextAttribute($domDocument, 'xmlns', self::XMLNS_SASL));
 		$auth->appendChild(self::getNewTextAttribute($domDocument, 'mechanism', $this->encryption));
+		
+		if ($initialMessage) {
+			$auth->appendChild($domDocument->createTextNode($initialMessage));
+		}
+
 		$body->appendChild($auth);
 
 		$response = $this->send($domDocument->saveXML());
-
 		$body = $this->getBodyFromXml($response);
 		$challenge = base64_decode($body->firstChild->nodeValue);
 
@@ -420,7 +416,7 @@ class XmppPrebind {
 		$auth->appendChild($domDocument->createTextNode($authString));
 		$body->appendChild($auth);
 
-		return $domDocument->saveXML();
+		return $this->send($domDocument->saveXML());
 	}
 
 	/**
@@ -481,6 +477,54 @@ class XmppPrebind {
 	}
 
 	/**
+	 * Send challenge request and build SCRAM-SHA-1 auth string
+	 *
+	 * @param Auth_SASL_Common $auth
+	 * 
+	 * @return string Auth XML to send
+	 */
+	protected function sendChallengeAndBuildScramSha1Auth(Auth_SASL_Common $auth) {
+
+		$initialMessage = $auth->getResponse(self::getNodeFromJid($this->jid), $this->password);
+
+		$initialMessage = base64_encode($initialMessage);
+
+		$challenge = $this->sendChallenge($initialMessage);
+
+		if (!$challenge) {
+			throw new XmppPrebindConnectionException('Invalid challenge response received');
+		}
+
+		$this->debug($initialMessage, 'SCRAM-SHA-1 Initial Message');
+
+		$authString = $auth->getResponse(self::getNodeFromJid($this->jid), $this->password, $challenge);		
+
+		$this->debug($authString, 'SCRAM-SHA-1 Auth String');
+
+		$authString = base64_encode($authString);
+
+		$domDocument = $this->buildBody();
+		$body = self::getBodyFromDomDocument($domDocument);
+
+		$response = $domDocument->createElement('response');
+		$response->appendChild(self::getNewTextAttribute($domDocument, 'xmlns', self::XMLNS_SASL));
+		$response->appendChild($domDocument->createTextNode($authString));
+
+		$body->appendChild($response);
+
+		$challengeResponse = $this->send($domDocument->saveXML());
+
+		$body = self::getBodyFromXml($challengeResponse);
+		$serverSignature = base64_decode((string)$body->firstChild->nodeValue);
+
+		if (!$auth->processOutcome($serverSignature)) {
+			throw new XmppPrebindConnectionException('Invalid Server Signature');
+		}
+
+		return $challengeResponse;
+	}
+
+	/**
 	 * CRAM-MD5 and DIGEST-MD5 reply with an additional challenge response which must be replied to.
 	 * After this additional reply, the server should reply with "success".
 	 */
@@ -498,7 +542,7 @@ class XmppPrebind {
 
 		$body->appendChild($response);
 
-		return $domDocument->saveXML();
+		return $this->send($domDocument->saveXML());
 	}
 
 	/**
@@ -677,6 +721,6 @@ class XmppPrebind {
 /**
  * Standard XmppPrebind Exception
  */
-class XmppPrebindException extends Exception{}
+class XmppPrebindException extends ErrorException{}
 
 class XmppPrebindConnectionException extends XmppPrebindException{}
